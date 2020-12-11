@@ -77,6 +77,10 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 			}
 		}
 
+		if (!options.password.isNullOrEmpty()) {
+			ForkJoinPool.commonPool().execute { jedisPool.resource.auth(options.password) }
+		}
+
 		if (options.async) {
 			ForkJoinPool.commonPool().execute { jedisPool.resource.use { jedis -> jedis.subscribe(jedisPubSub!!, channel) } }
 		} else {
