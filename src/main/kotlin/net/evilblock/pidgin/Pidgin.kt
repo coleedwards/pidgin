@@ -33,6 +33,9 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 			jsonObject.add("messageData", morph.fromObject(message.data))
 
 			jedisPool.resource.use { jedis -> jedis.publish(channel, jsonObject.toString()) }
+			if (options.debug) {
+				println("[Pidgin] Sent message '${message.id}'")
+			}
 		} catch (e: Exception) {
 			exceptionHandler?.onException(e)
 		}
@@ -68,6 +71,9 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 						for (data in messageListeners) {
 							if (data.id == messageId) {
 								data.method.invoke(data.instance, messageData)
+								if (options.debug) {
+									println("[Pidgin] Received message '${messageId}'")
+								}
 							}
 						}
 					} catch (e: JsonParseException) {
