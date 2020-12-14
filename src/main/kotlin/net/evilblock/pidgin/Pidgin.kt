@@ -53,6 +53,10 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 	}
 
 	private fun setupPubSub() {
+		if (options.passwordEnabled) {
+			ForkJoinPool.commonPool().execute { jedisPool.resource.auth(options.password) }
+		}
+
 		jedisPubSub = object : JedisPubSub() {
 			override fun onMessage(channel: String, message: String) {
 				if (channel.equals(this@Pidgin.channel, ignoreCase = true)) {
@@ -75,10 +79,6 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 					}
 				}
 			}
-		}
-
-		if (!options.password.isNullOrEmpty()) {
-			ForkJoinPool.commonPool().execute { jedisPool.resource.auth(options.password) }
 		}
 
 		if (options.async) {
