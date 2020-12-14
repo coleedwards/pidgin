@@ -32,7 +32,12 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 			jsonObject.addProperty("messageId", message.id)
 			jsonObject.add("messageData", morph.fromObject(message.data))
 
-			jedisPool.resource.use { jedis -> jedis.publish(channel, jsonObject.toString()) }
+			jedisPool.resource.use { jedis -> {
+				if (options.passwordEnabled) {
+					jedis.auth(options.password)
+				}
+				jedis.publish(channel, jsonObject.toString())
+			} }
 			if (options.debug) {
 				println("[Pidgin] Sent message '${message.id}'")
 			}
@@ -56,10 +61,6 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 	}
 
 	private fun setupPubSub() {
-		if (options.passwordEnabled) {
-			ForkJoinPool.commonPool().execute { jedisPool.resource.auth(options.password) }
-		}
-
 		jedisPubSub = object : JedisPubSub() {
 			override fun onMessage(channel: String, message: String) {
 				if (channel.equals(this@Pidgin.channel, ignoreCase = true)) {
@@ -95,7 +96,12 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 				jedis.subscribe(jedisPubSub!!, channel)
 			} } }
 		} else {
-			jedisPool.resource.use { jedis -> jedis.subscribe(jedisPubSub!!, channel) }
+			jedisPool.resource.use { jedis -> {
+				if (options.passwordEnabled) {
+					jedis.auth(options.password)
+				}
+				jedis.subscribe(jedisPubSub!!, channel)
+			} }
 		}
 	}
 
