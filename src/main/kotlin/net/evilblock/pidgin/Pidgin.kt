@@ -7,18 +7,19 @@ import net.evilblock.pidgin.message.handler.MessageExceptionHandler
 import net.evilblock.pidgin.message.listener.MessageListener
 import net.evilblock.pidgin.message.listener.MessageListenerData
 import com.google.gson.*
+import org.redisson.Redisson
+import org.redisson.api.RTopic
+import org.redisson.api.RedissonClient
 import java.util.ArrayList
 import java.util.concurrent.ForkJoinPool
-import redis.clients.jedis.JedisPool
-import redis.clients.jedis.JedisPubSub
 import java.lang.IllegalStateException
 
 /**
  * A Jedis Pub/Sub implementation.
  */
-class Pidgin(private val channel: String, private val jedisPool: JedisPool, private val options: PidginOptions = PidginOptions()) {
+class Pidgin(private val channel: String, private val redisson: RedissonClient, private val options: PidginOptions = PidginOptions()) {
 
-	private var jedisPubSub: JedisPubSub? = null
+	private var rTopic: RTopic<String> = redisson.getTopic(channel)
 	private val messageListeners: MutableList<MessageListenerData> = ArrayList()
 
 	init {
@@ -32,12 +33,7 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 			jsonObject.addProperty("messageId", message.id)
 			jsonObject.add("messageData", morph.fromObject(message.data))
 
-			jedisPool.resource.use { jedis -> {
-				if (options.passwordEnabled) {
-					jedis.auth(options.password)
-				}
-				jedis.publish(channel, jsonObject.toString())
-			} }
+			rTopic.publish(jsonObject.toString())
 			if (options.debug) {
 				println("[Pidgin] Sent message '${message.id}'")
 			}
@@ -61,48 +57,28 @@ class Pidgin(private val channel: String, private val jedisPool: JedisPool, priv
 	}
 
 	private fun setupPubSub() {
-		jedisPubSub = object : JedisPubSub() {
-			override fun onMessage(channel: String, message: String) {
-				if (channel.equals(this@Pidgin.channel, ignoreCase = true)) {
-					try {
-						val messagePayload = parser.parse(message).asJsonObject
-						val messageId = messagePayload.get("messageId").asString
-						val messageData = messagePayload.get("messageData").asJsonObject
+		rTopic.addListener({ channel, msg ->
+			try {
+				val messagePayload = parser.parse(msg).asJsonObject
+				val messageId = messagePayload.get("messageId").asString
+				val messageData = messagePayload.get("messageData").asJsonObject
 
-						for (data in messageListeners) {
-							if (data.id == messageId) {
-								data.method.invoke(data.instance, messageData)
-								if (options.debug) {
-									println("[Pidgin] Received message '${messageId}'")
-								}
-							}
+				for (data in messageListeners) {
+					if (data.id == messageId) {
+						data.method.invoke(data.instance, messageData)
+						if (options.debug) {
+							println("[Pidgin] Received message '${messageId}'")
 						}
-					} catch (e: JsonParseException) {
-						println("[Pidgin] Expected JSON message but could not parse message")
-						e.printStackTrace()
-					} catch (e: Exception) {
-						println("[Pidgin] Failed to handle message")
-						e.printStackTrace()
 					}
 				}
+			} catch (e: JsonParseException) {
+				println("[Pidgin] Expected JSON message but could not parse message")
+				e.printStackTrace()
+			} catch (e: Exception) {
+				println("[Pidgin] Failed to handle message")
+				e.printStackTrace()
 			}
-		}
-
-		if (options.async) {
-			ForkJoinPool.commonPool().execute { jedisPool.resource.use { jedis -> {
-				if (options.passwordEnabled) {
-					jedis.auth(options.password)
-				}
-				jedis.subscribe(jedisPubSub!!, channel)
-			} } }
-		} else {
-			jedisPool.resource.use { jedis -> {
-				if (options.passwordEnabled) {
-					jedis.auth(options.password)
-				}
-				jedis.subscribe(jedisPubSub!!, channel)
-			} }
-		}
+		})
 	}
 
 	companion object {
